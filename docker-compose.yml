@@ -1,6 +1,19 @@
 version: '3'
 
 services:
+  webapp:
+    build: ./webapp
+    ports:
+      - "5000:5000"
+    depends_on:
+      - kafka1
+      - kafka2
+      - kafka3
+    volumes:
+      - ./webapp:/app
+    networks:
+      - kafka-network
+      - airflow-kafka
   zoo1:
     image: confluentinc/cp-zookeeper:7.3.2
     ports:
@@ -132,6 +145,7 @@ services:
     environment:
       - SPARK_UI_PORT=8080
       - SPARK_MODE=master
+      - SPARK_MASTER_PORT=8085
       - SPARK_RPC_AUTHENTICATION_ENABLED=no
       - SPARK_RPC_ENCRYPTION_ENABLED=no
     volumes:

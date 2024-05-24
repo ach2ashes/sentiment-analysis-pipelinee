@@ -1,20 +1,51 @@
 # Information
-![image](https://github.com/dogukannulu/kafka_spark_structured_streaming/assets/91257958/2048d405-596c-4921-a938-dcad3d24899e)
 
 
+This project demonstrates the use of Apache Spark Structured Streaming with Kafka, Cassandra, and S3. It processes streaming data from Kafka, performs sentiment analysis using VADER, and stores the results in a Cassandra database. Additionally, it archives the processed data to S3 in CSV format. Airflow is used to trigger the review submission process.
 
+Project Structure
+stream_to_kafka.py: A Flask app that serves as the UI for submitting reviews.
+spark_streaming.py: A Spark Structured Streaming job that reads data from Kafka, performs sentiment analysis, and writes the results to Cassandra and S3.
+docker-compose.yml: A Docker Compose file to set up the necessary containers for Kafka, Zookeeper, Cassandra, Spark, and the Flask app.
+kafka_review_submission_dag.py: An Airflow DAG to trigger the review submission process.
+requirements.txt: Python dependencies for the Flask app.
+Dockerfile: Dockerfile for building the Flask app container.
 
-This repo illustrates the Spark Structured Streaming
+Detailed Explanation of Each Component
+Flask App (stream_to_kafka.py)
+This Flask app provides a simple web interface for users to submit reviews. It sends the submitted reviews to a Kafka topic named reviews.
 
-Gets random names from the API. Sends the name data to Kafka topics every 10 seconds using Airflow. Every message is read by Kafka consumer using Spark Structured Streaming and written to Cassandra table on a regular interval.
+Key Functions:
 
-`stream_to_kafka_dag.py` -> The DAG script that writes the API data to a Kafka producer every 10 seconds.
+index(): Renders the main page with a form to submit reviews.
+submit_review(): Receives the review data and sends it to Kafka.
+Spark Streaming Job (spark_streaming.py)
+This script defines a Spark Structured Streaming job that reads review data from Kafka, performs sentiment analysis using VADER, writes the results to Cassandra, and archives the data to S3.
 
-`stream_to_kafka.py` -> The script that gets the data from API and sends it to Kafka topic
+Key Functions:
 
-`spark_streaming.py` -> The script that consumes the data fromo Kafka topic with Spark Structured Streaming
+create_spark_session(): Sets up the Spark session with necessary configurations.
+create_initial_dataframe(): Reads streaming data from Kafka and creates an initial DataFrame.
+create_final_dataframe(): Applies transformations to the initial DataFrame, including sentiment analysis.
+start_streaming(): Defines and starts the streaming queries to Cassandra and S3.
+Airflow DAG (dags/kafka_review_submission_dag.py)
+This DAG triggers the review submission process using a Python script. It runs periodically or can be triggered manually.
 
-`response.json` -> Sample response coming from the API
+Key Tasks:
+
+submit_review_to_kafka: A task that triggers the submit_review.py script to send a review to Kafka.
+Docker Compose (docker-compose.yml)
+This file defines the Docker services for Kafka, Zookeeper, Cassandra, Spark, the Flask app, and Airflow. It ensures that all necessary components are started and configured correctly.
+
+Key Services:
+
+webapp: The Flask app service.
+zoo1: Zookeeper service.
+kafka1, kafka2, kafka3: Kafka broker services.
+cassandra: Cassandra database service.
+spark: Spark service.
+kafka-ui: Kafka UI service.
+airflow-scheduler, airflow-webserver, airflow-worker, airflow-init: Airflow services.
 
 
 ## Apache Airflow
@@ -53,10 +84,10 @@ docker-compose up -d
 
 
 
-After accessing to Kafka UI, we can create the topic `random_names`. Then, we can see the messages coming to Kafka topic:
+After accessing to Kafka UI(u should wait a few minutes ), we can create the topic `reviews`.so, we can see the messages coming to Kafka topic:
 
 
-<img width="654" alt="image" src="https://github.com/dogukannulu/kafka_spark_structured_streaming/assets/91257958/37a4286a-2afe-49bd-845d-1c98d2b45e3f">
+
 
 
 
@@ -75,29 +106,32 @@ After accessing the bash, we can run the following command to access to cqlsh cl
 cqlsh -u cassandra -p cassandra
 ```
 
-Then, we can run the following commands to create the keyspace `spark_streaming` and the table `random_names`:
+Then, we can run the following commands to create the keyspace `sentient_analysis` and the table `reviews`:
 
 ```bash
-CREATE KEYSPACE spark_streaming WITH replication = {'class':'SimpleStrategy','replication_factor':1};
+CREATE KEYSPACE IF NOT EXISTS sentiment_analysis WITH REPLICATION = {'class': 'SimpleStrategy', 'replication_factor': 1};
+CREATE TABLE IF NOT EXISTS sentiment_analysis.reviews (
+  review_id UUID PRIMARY KEY,
+  review_text TEXT,
+  sentiment TEXT
+);
 ```
 
-```bash
-CREATE TABLE spark_streaming.random_names(full_name text primary key, gender text, location text, city text, country text, postcode int, latitude float, longitude float, email text);
-DESCRIBE spark_streaming.random_names;
-```
 
-![image](https://github.com/dogukannulu/kafka_spark_structured_streaming/assets/91257958/4a196399-255d-4962-8dd8-807872a8f583)
+
+
 
 
 
 ## Running DAGs
 
-We should move `stream_to_kafka.py` and `stream_to_kafka_dag.py` scripts under `dags` folder in `docker-airflow` repo. Then we can see that `random_people_names` appears in DAGS page.
+We should move `stream_to_kafka_dag.py` scripts under `dags` folder in `docker-airflow` repo and create a folder `scripts` and move the script `submit_review.py` there. Then we can see that the dag appears in DAGS page.
 
 
-When we turn the OFF button to ON, we can see that the data will be sent to Kafka topics every 10 seconds. We can check from Kafka UI as well.
+When we turn the OFF button to ON, the reviews submitted to the webapp will be sent to the kafka topic.
 
-<img width="1418" alt="image" src="https://github.com/dogukannulu/kafka_spark_structured_streaming/assets/91257958/8dc1ef5c-f256-40d3-94dc-7f6247edbe44">
+## Flask webapp
+We can access to the webapp by running http://localhost:5000 to submit our reviews
 
 
 
@@ -106,6 +140,12 @@ First of all we should copy the local PySpark script into the container:
 
 ```bash
 docker cp spark_streaming.py spark_master:/opt/bitnami/spark/
+```
+We shoud install the sentiment analysis library in Spark
+```bash
+docker exec -u 0 -it spark_master /bin/bash
+pip install vaderSentiment
+exit
 ```
 
 We should then access the Spark container and install necessary JAR files under jars directory.
@@ -118,20 +158,18 @@ We should run the following commands to install the necessary JAR files under fo
 
 ```bash
 cd jars
-curl -O https://repo1.maven.org/maven2/com/datastax/spark/spark-cassandra-connector_2.12/3.3.0/spark-cassandra-connector_2.12-3.3.0.jar
-curl -O https://repo1.maven.org/maven2/org/apache/spark/spark-sql-kafka-0-10_2.13/3.3.0/spark-sql-kafka-0-10_2.13-3.3.0.jar
+curl -O https://repo1.maven.org/maven2/org/apache/commons/commons-pool2/2.11.1/commons-pool2-2.11.1.jar
 ```
 
-While the API data is sent to the Kafka topic `random_names` regularly, we can submit the PySpark application and write the topic data to Cassandra table:
+While the APP data is sent to the Kafka topic `reviews` every time we trigger the dag, we can submit the PySpark application and write the topic data to Cassandra table and S3 bucket:
 
 ```bash
 cd ..
-spark-submit --master local[2] --jars /opt/bitnami/spark/jars/spark-sql-kafka-0-10_2.13-3.3.0.jar,/opt/bitnami/spark/jars/spark-cassandra-connector_2.12-3.3.0.jar spark_streaming.py
+spark-submit --master local[2] --packages org.apache.hadoop:hadoop-aws:3.3.1,com.amazonaws:aws-java-sdk-bundle:1.11.901,org.apache.hadoop:hadoop-common:3.3.1,com.datastax.spark:spark-cassandra-connector_2.12:3.5.0,org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.1 --jars /opt/bitnami/spark/jars/commons-pool2-2.11.1.jar spark_streaming.py
 ```
 
 After running the commmand, we can see that the data is populated into Cassandra table
-
-![image](https://github.com/dogukannulu/kafka_spark_structured_streaming/assets/91257958/3aff4993-d489-47e1-bc5b-b6b03446ebd5)
+and find the csv in the bucket 
 
 
 Enjoy :)

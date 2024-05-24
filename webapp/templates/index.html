@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Submit Review</title>
+</head>
+<body>
+    <h1>Submit Review</h1>
+    <form id="reviewForm">
+        <textarea id="reviewText" placeholder="Write your review here..." rows="4" cols="50"></textarea><br>
+        <button type="button" onclick="submitReview()">Submit</button>
+    </form>
+
+    <script>
+        function submitReview() {
+            const reviewText = document.getElementById('reviewText').value;
+            fetch('/submit_review', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ review: reviewText })
+            })
+            .then(response => response.json())
+            .then(data => {
+                alert(data.message);
+            });
+        }
+    </script>
+</body>
+</html>

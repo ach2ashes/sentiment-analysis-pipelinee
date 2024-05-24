@@ -1,8 +1,9 @@
 import logging
 from pyspark.sql import SparkSession
-from pyspark.sql.types import StructType,StructField,FloatType,IntegerType,StringType
-from pyspark.sql.functions import from_json,col
-
+from pyspark.sql.types import StructType, StructField, StringType
+from pyspark.sql.functions import from_json, col, udf
+from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
+import uuid
 logging.basicConfig(level=logging.INFO,
                     format='%(asctime)s:%(funcName)s:%(levelname)s:%(message)s')
 logger = logging.getLogger("spark_structured_streaming")
@@ -15,18 +16,21 @@ def create_spark_session():
     try:
         # Spark session is established with cassandra and kafka jars. Suitable versions can be found in Maven repository.
         spark = SparkSession \
-                .builder \
-                .appName("SparkStructuredStreaming") \
-                .config("spark.jars.packages", "com.datastax.spark:spark-cassandra-connector_2.12:3.0.0,org.apache.spark:spark-sql-kafka-0-10_2.12:3.0.0") \
-                .config("spark.cassandra.connection.host", "cassandra") \
-                .config("spark.cassandra.connection.port","9042")\
-                .config("spark.cassandra.auth.username", "cassandra") \
-                .config("spark.cassandra.auth.password", "cassandra") \
-                .getOrCreate()
+            .builder \
+            .appName("SparkStructuredStreaming") \
+            .config("spark.jars.packages", "com.datastax.spark:spark-cassandra-connector_2.12:3.5.0,org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.1,org.apache.commons:commons-pool2:2.11.1") \
+            .config("spark.cassandra.connection.host", "cassandra") \
+            .config("spark.cassandra.connection.port", "9042") \
+            .config("spark.cassandra.auth.username", "cassandra") \
+            .config("spark.cassandra.auth.password", "cassandra") \
+            .config("spark.hadoop.fs.s3a.access.key", "AKIAYEQZEJ7WKN7XLWM7") \
+            .config("spark.hadoop.fs.s3a.secret.key", "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") \
+            .config("spark.hadoop.fs.s3a.endpoint", "s3.amazonaws.com") \
+            .getOrCreate()
         spark.sparkContext.setLogLevel("ERROR")
         logging.info('Spark session created successfully')
-    except Exception:
-        logging.error("Couldn't create the spark session")
+    except Exception as e:
+        logging.error(f"Couldn't create the spark session: {e}")
 
     return spark
 
@@ -38,13 +42,13 @@ def create_initial_dataframe(spark_session):
     try:
         # Gets the streaming data from topic random_names
         df = spark_session \
-              .readStream \
-              .format("kafka") \
-              .option("kafka.bootstrap.servers", "kafka1:19092,kafka2:19093,kafka3:19094") \
-              .option("subscribe", "random_names") \
-              .option("delimeter",",") \
-              .option("startingOffsets", "earliest") \
-              .load()
+            .readStream \
+            .format("kafka") \
+            .option("kafka.bootstrap.servers", "kafka1:19092,kafka2:19093,kafka3:19094") \
+            .option("subscribe", "reviews") \
+            .option("delimiter", ",") \
+            .option("startingOffsets", "earliest") \
+            .load()
         logging.info("Initial dataframe created successfully")
     except Exception as e:
         logging.warning(f"Initial dataframe couldn't be created due to exception: {e}")
@@ -57,19 +61,40 @@ def create_final_dataframe(df, spark_session):
     Modifies the initial dataframe, and creates the final dataframe.
     """
     schema = StructType([
-                StructField("full_name",StringType(),False),
-                StructField("gender",StringType(),False),
-                StructField("location",StringType(),False),
-                StructField("city",StringType(),False),
-                StructField("country",StringType(),False),
-                StructField("postcode",IntegerType(),False),
-                StructField("latitude",FloatType(),False),
-                StructField("longitude",FloatType(),False),
-                StructField("email",StringType(),False)
-            ])
+   StructField("review_id", StringType(), True),
+        StructField("review_text", StringType())
+    ])
+    # Initialize VADER sentiment analyzer
+    analyzer = SentimentIntensityAnalyzer()
 
-    df = df.selectExpr("CAST(value AS STRING)").select(from_json(col("value"),schema).alias("data")).select("data.*")
-    print(df)
+    # Define UDF for sentiment analysis
+    def analyze_sentiment(text):
+        print(text)
+        if text is None:
+            return 'neutral'
+        score = analyzer.polarity_scores(text)
+        if score['compound'] >= 0.05:
+            return 'positive'
+        elif score['compound'] <= -0.05:
+            return 'negative'
+        else:
+            return 'neutral'
+
+    sentiment_udf = udf(analyze_sentiment, StringType())
+
+    def generate_uuid():
+            return str(uuid.uuid4())
+
+    uuid_udf = udf(generate_uuid, StringType())
+
+    df = df.selectExpr("CAST(value AS STRING)") \
+            .select(from_json(col("value"), schema).alias("data")) \
+            .select("data.*") \
+            .withColumn("review_id", uuid_udf()) \
+            .withColumn("sentiment", sentiment_udf(col("review_text")))
+    query = df.writeStream.outputMode("append").format("console").start()
+    query.awaitTermination(20)
+
     return df
 
 
@@ -78,13 +103,21 @@ def start_streaming(df):
     Starts the streaming to table spark_streaming.random_names in cassandra
     """
     logging.info("Streaming is being started...")
-    my_query = (df.writeStream
-                  .format("org.apache.spark.sql.cassandra")
-                  .outputMode("append")
-                  .options(table="random_names", keyspace="spark_streaming")\
+
+    query = (df.writeStream
+             .format("org.apache.spark.sql.cassandra")
+             .outputMode("append")
+             .options(table="reviews", keyspace="sentiment_analysis")
+             .option("checkpointLocation", "/tmp/checkpoints/cassandra")
+             .start())
+    s3_query = (df.writeStream
+                  .format("csv")
+                  .option("path", "s3a://sentiment-analysis-freelance/reviews")
+                  .option("checkpointLocation", "/tmp/checkpoints/s3")
+                  .trigger(processingTime='1 minutes')
                   .start())
 
-    return my_query.awaitTermination()
+    return query.awaitTermination(),s3_query.awaitTerination()
 
 
 def write_streaming_data():

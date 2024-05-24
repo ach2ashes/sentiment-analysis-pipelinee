@@ -1,25 +1,28 @@
-from datetime import timedelta
 from airflow import DAG
-from airflow.operators.python_operator import PythonOperator
-from datetime import datetime
-from stream_to_kafka import start_streaming
-
-start_date = datetime(2018, 12, 21, 12, 12)
+from airflow.operators.bash_operator import BashOperator
+from datetime import datetime, timedelta
 
 default_args = {
     'owner': 'airflow',
-    'start_date': start_date,
+    'depends_on_past': False,
+    'start_date': datetime(2023, 1, 1),
+    'email_on_failure': False,
+    'email_on_retry': False,
     'retries': 1,
-    'retry_delay': timedelta(seconds=5)
+    'retry_delay': timedelta(minutes=1),
 }
 
-with DAG('random_people_names', default_args=default_args, schedule_interval='0 1 * * *', catchup=False) as dag:
+dag = DAG(
+    'kafka_review_submission_dag',
+    default_args=default_args,
+    description='Submit review to Kafka via Flask app',
+    schedule_interval=None,  # Only run manually
+)
 
-
-    data_stream_task = PythonOperator(
-    task_id='kafka_data_stream',
-    python_callable=start_streaming,
+submit_review = BashOperator(
+    task_id='submit_review_to_kafka',
+    bash_command='python3 /usr/local/airflow/scripts/submit_review.py',
     dag=dag,
-    )
+)
 
-    data_stream_task
+submit_review
