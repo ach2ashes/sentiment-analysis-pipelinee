@@ -21,13 +21,13 @@ def index():
 
 @app.route('/submit_review', methods=['POST'])
 def submit_review():
-    review_text = request.json.get('review')
+    product = request.form['product']
+    review_text = request.form['review']
     if not review_text:
         return jsonify({'status': 'error', 'message': 'No review text provided'}), 400
 
-    review = {
-        'review_text': review_text
-    }
+  
+    review = {'product': product, 'review_text': review_text}
 
     reviews.append(review)
     return jsonify({'status': 'success', 'message': 'Review submitted successfully', 'review': review})

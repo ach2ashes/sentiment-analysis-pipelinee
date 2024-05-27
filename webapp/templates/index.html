@@ -7,9 +7,23 @@
 </head>
 <body>
     <h1>Submit Review</h1>
-    <form id="reviewForm">
-        <textarea id="reviewText" placeholder="Write your review here..." rows="4" cols="50"></textarea><br>
-        <button type="button" onclick="submitReview()">Submit</button>
+    <form action="/submit_review" method="post">
+        <label for="product">Select a product:</label>
+        <select name="product" id="product">
+            <option value="product1">Product 1</option>
+            <option value="product2">Product 2</option>
+            <option value="product3">Product 3</option>
+            <!-- Add more products as needed -->
+        </select>
+        <br><br>
+        <label for="review">Review:</label>
+        <textarea name="review" id="review" rows="4" cols="50"></textarea>
+        <br><br>
+        <input type="submit" value="Submit Review">
+    </form>
+</body>
+</html>
+
     </form>
 
     <script>

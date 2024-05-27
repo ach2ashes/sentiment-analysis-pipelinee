@@ -62,6 +62,7 @@ def create_final_dataframe(df, spark_session):
     """
     schema = StructType([
    StructField("review_id", StringType(), True),
+   StructField("product", StringType()),
         StructField("review_text", StringType())
     ])
     # Initialize VADER sentiment analyzer

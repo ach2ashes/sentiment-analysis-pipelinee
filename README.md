@@ -112,6 +112,7 @@ Then, we can run the following commands to create the keyspace `sentient_analysi
 CREATE KEYSPACE IF NOT EXISTS sentiment_analysis WITH REPLICATION = {'class': 'SimpleStrategy', 'replication_factor': 1};
 CREATE TABLE IF NOT EXISTS sentiment_analysis.reviews (
   review_id UUID PRIMARY KEY,
+  product TEXT,
   review_text TEXT,
   sentiment TEXT
 );
